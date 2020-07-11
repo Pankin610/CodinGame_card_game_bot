@@ -1,37 +1,45 @@
 import numpy as np
 
 INF = 2000000000
+mx_step = 2
 
 class Creature:
     creature_hashes = {}
 
-    def __init__(self, id_, cost, attack, hp, can_attack = 0, side = 1):
+    def __init__(self, type_, id_, cost, attack, hp, abilities, can_attack = 0, side = 1):
+        self.type_ = type_
         self.cost = cost
         self.attack = attack
         self.hp = hp
         self.side = side
         self.can_attack = can_attack
         self.id_ = id_
+        self.abilities = abilities
 
     def __hash__(self):
-        return (self.attack, self.hp, self.side, self.can_attack).__hash__()
+        return (self.attack, self.hp, self.side, self.abilities, self.can_attack).__hash__()
 
     def copy(self):
-        return Creature(self.id_, self.cost, self.attack, self.hp, self.can_attack, self.side)
+        return Creature(self.type_, self.id_, self.cost, self.attack, self.hp, self.abilities, self.can_attack, self.side)
 
 class GameState:
     player_health_hash = [list(map(int, np.random.randint(0, INF, 100))), list(map(int, np.random.randint(0, INF, 100)))]
     turn_hash = list(map(int, np.random.randint(0, INF, 2)))
 
+    def __eq__(self, other):
+        return self.hash == other.hash
+    def __ne__(self, other):
+        return self.hash != other.hash
+
     @staticmethod
     def getValue(self):
-        value = (self.myHP - self.enemyHP) / 2.0
+        value = int((-(50 - self.myHP)**1.1 + (50 - self.enemyHP)**1.1) / 30.0)
         for i in self.my_board:
-            value += i.hp
-            value += i.attack
+            value += i.hp * 100
+            value += i.attack * 100
         for i in self.enemy_board:
-            value -= i.hp
-            value -= i.attack
+            value -= i.hp * 100
+            value -= i.attack * 100
         return value
 
     def __init__(self):
@@ -133,10 +141,16 @@ class Step:
 
 game_result, best_step = {}, {}
 
-def getResult(v):
+def hasTaunt(board):
+    for i in board:
+        if 'G' in i.abilities:
+            return True
+    return False
+
+def getResult(v, alpha, beta):
     if v in game_result:
         return game_result[v]
-
+    
     if v.myHP <= 0:
         game_result[v] = -INF
         best_step[v] = Step(-1, -1, True)
@@ -155,40 +169,64 @@ def getResult(v):
 
     if v.turn == 0:
         game_result[v] = INF
+        best_step[v] = Step(-1, -1, True)
         func = lambda x, y : x > y
-        mb = v.enemy_board
-        eb = v.my_board
+        mb = [i.copy() for i in v.enemy_board]
+        eb = [i.copy() for i in v.my_board]
     else:
         game_result[v] = -INF
+        best_step[v] = Step(-1, -1, True)
         func = lambda x, y : x < y
-        mb = v.my_board
-        eb = v.enemy_board
+        mb = [i.copy() for i in v.my_board]
+        eb = [i.copy() for i in v.enemy_board]
         
     can_do = False
+    steps = 0
 
     for i in mb:
-        if i.can_attack == 0:
+        if i.can_attack == 0 or i.attack == 0:
             continue
-        can_do = True
+        if alpha >= beta or steps >= mx_step:
+            return game_result[v]
 
-        new_game = v.copy()
-        new_game.attackHero(i.id_)
-        if func(game_result[v], getResult(new_game)):
-            game_result[v] = getResult(new_game)
-            best_step[v] = Step(i.id_, -1)
+        new_game = 0
+
         for j in eb:
+            if (not 'G' in j.abilities) and hasTaunt(eb):
+                continue
+            if alpha >= beta or steps >= mx_step:
+                return game_result[v]
+            can_do = True
+            steps += 1
             new_game = v.copy()
             new_game.attack(i.id_, j.id_)
-            if func(game_result[v], getResult(new_game)):
-                game_result[v] = getResult(new_game)    
+            if func(game_result[v], getResult(new_game, alpha, beta)):
+                game_result[v] = getResult(new_game, alpha, beta)    
                 best_step[v] = Step(i.id_, j.id_)
+                if v.turn == 1:
+                    alpha = max(alpha, game_result[v])
+                else:
+                    beta = min(beta, game_result[v])
+
+        if not hasTaunt(eb) and steps < mx_step:
+            can_do = True
+            steps += 1
+            new_game = v.copy()
+            new_game.attackHero(i.id_)
+            if func(game_result[v], getResult(new_game, alpha, beta)):
+                game_result[v] = getResult(new_game, alpha, beta)
+                best_step[v] = Step(i.id_, -1)
+                if v.turn == 1:
+                    alpha = max(alpha, game_result[v])
+                else:
+                    beta = min(beta, game_result[v])
+            
         
     if not can_do:
         new_game = v.copy()
         new_game.nextTurn()
-        if func(game_result[v], getResult(new_game)):
-            game_result[v] = getResult(new_game)
-            best_step[v] = Step(-1, -1, True)
+        game_result[v] = getResult(new_game, alpha, beta)
+        best_step[v] = Step(-1, -1, True)
 
     return game_result[v]
 
@@ -197,6 +235,24 @@ def get_int(x):
         return int(x)
     except:
         return x
+
+def get_id_smallest(board):
+    res_id = -1
+    res_val = INF
+    for i in board:
+        if i.hp + i.attack < res_val:
+            res_val = i.hp + i.attack
+            res_id = i.id_
+    return res_id
+
+def get_id_biggest(board, x = INF):
+    res_id = -1
+    res_val = -INF
+    for i in board:
+        if i.hp + i.attack > res_val and i.hp <= x:
+            res_val = i.hp + i.attack
+            res_id = i.id_
+    return res_id
 
 turns = 0
 while True:
@@ -219,11 +275,11 @@ while True:
     for i in range(cardCount):
         cardNumber, instanceId, location, cardType, cost, attack, defense, abilities, myhealthChange, opponentHealthChange, cardDraw = list(map(get_int, input().split()))
         if location == 1:
-            my_cards.append(Creature(instanceId, cost, attack, defense, int(location == 1)))
+            my_cards.append(Creature(cardType, instanceId, cost, attack, defense, abilities,  int(location == 1)))
         elif location == -1:
-            enemy_cards.append(Creature(instanceId, cost, attack, defense, int(location == 1)))
+            enemy_cards.append(Creature(cardType, instanceId, cost, attack, defense, abilities, int(location == 1)))
         else:
-            hand.append(Creature(instanceId, cost, attack, defense, int(location == 1)))
+            hand.append(Creature(cardType, instanceId, cost, attack, defense, abilities, int(location == 1)))
     
 
 
@@ -232,6 +288,31 @@ while True:
         turns += 1
     else:
         s = ''
+
+        hand.sort(key = lambda x: x.cost)
+        for i in hand:
+            if i.type_ == 0:
+                continue
+            if mana < i.cost:
+                continue
+
+            if i.type_ == 3 and i.hp == 0:
+                continue
+            if i.type_ == 3:
+                if i.hp < 0:
+                    i.type_ = 2
+                else:
+                    i.type_ = 1
+                
+            if i.type_ == 1:
+                if get_id_smallest(my_cards) != -1:
+                    s += ' '.join(['USE', str(i.id_), str(get_id_smallest(my_cards)), ';'])
+                    mana -= i.cost
+            else:
+                if get_id_biggest(enemy_cards, -i.hp) != -1:
+                    s += ' '.join(['USE', str(i.id_), str(get_id_smallest(enemy_cards)), ';'])
+                    mana -= i.cost
+
         game.enemy_board = enemy_cards
         game.my_board = my_cards
         game.update_hash()
@@ -239,15 +320,24 @@ while True:
         if len(game.enemy_board) == 0:
             for i in game.my_board:
                 s += game.doStep(Step(i.id_, -1))
+            print(s)
+            continue
+
+        if len(game.enemy_board) * len(game.my_board) > 9:
+            mx_step = 2
+        else:
+            mx_step = 1000
 
         while True:
-            getResult(game)
+            getResult(game.copy(), -INF - 5, INF + 5)
             if best_step[game].is_pass:
                 break
 
             s += game.doStep(best_step[game])
 
         for i in hand:
+            if i.type_ != 0:
+                continue
             if mana >= i.cost:
                 s += 'SUMMON ' + str(i.id_) + ';'
                 mana -= i.cost
