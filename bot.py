@@ -466,7 +466,11 @@ def parse_abilities(abilities):
 ############################################################################
 
 turns = 0
-trash = set(55, 63, 83, 91, 92, 100, 110, 24, 31)
+trash = set([55, 63, 83, 91, 92, 100, 110, 24, 31, 57, 2, 10, 42, 81, 89, 90, 108, 107, 113, 20])
+exceptions = set([150, 151, 158])
+
+mc = [0] * 20
+coef = [1.1, 0.7, 0.5, 0.5, 0.6, 0.7, 1.0, 1.1, 1.3, 1.3, 1.3, 1.3, 1.3, 1.3, 1.3, 1.3, 1.3, 1.3, 1.3, 1.3, 1.3, 1.3, 1.3]
 
 while True:
     game_result, best_step = {}, {}
@@ -502,11 +506,30 @@ while True:
     if turns < 30:
         nhand = []
         for i in range(3):
-            if hand[i].type_ == 0 and not nums[i] in trash:
+            if (hand[i].type_ == 0 or nums[i] in exceptions) and not nums[i] in trash:
                 nhand.append(i)
         if len(nhand) == 0:
             nhand = list(range(3))
-        print('PICK', nhand[np.random.randint(0, len(nhand))])
+
+        best_opt = nhand[int(np.random.randint(0, len(nhand)))]
+        best_ad = -INF
+
+        for i in nhand:
+            if nums[i] in exceptions:
+                best_opt = i
+                exceptions.discard(nums[i])
+                break
+            ad = hand[i].getValue(True) / max(1, hand[i].cost) + hand[i].cardDraw * 1.5
+            mc[min(hand[i].cost, 8)] += 1
+            ad -= sum(mc[i] * mc[i] * coef[i] for i in range(len(mc))) * 70.0
+            mc[min(hand[i].cost, 8)] -= 1
+
+            if ad > best_ad:
+                best_ad = ad
+                best_opt = i
+
+        print('PICK', best_opt)
+        mc[min(hand[best_opt].cost, 8)] += 1
         turns += 1
     else:
         s = ''
