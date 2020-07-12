@@ -466,6 +466,8 @@ def parse_abilities(abilities):
 ############################################################################
 
 turns = 0
+trash = set(55, 63, 83, 91, 92, 100, 110, 24, 31)
+
 while True:
     game_result, best_step = {}, {}
     game = GameState()
@@ -482,6 +484,7 @@ while True:
     
     cardCount = int(input())
     my_cards, enemy_cards, hand = [], [], []
+    nums = []
 
     for i in range(cardCount):
         cardNumber, instanceId, location, cardType, cost, attack, defense, abilities, myhealthChange, opponentHealthChange, cardDraw = list(map(get_int, input().split()))
@@ -492,11 +495,18 @@ while True:
             enemy_cards.append(Creature(cardType, instanceId, cost, attack, defense, abilities, cardDraw, myhealthChange, opponentHealthChange, int(location == 1 or (abilities&2) > 0)))
         else:
             hand.append(Creature(cardType, instanceId, cost, attack, defense, abilities, cardDraw, myhealthChange, opponentHealthChange, int(location == 1 or (abilities&2) > 0)))
+            nums.append(cardNumber)
     
 
 
     if turns < 30:
-        print('PICK', np.random.randint(0, 3))
+        nhand = []
+        for i in range(3):
+            if hand[i].type_ == 0 and not nums[i] in trash:
+                nhand.append(i)
+        if len(nhand) == 0:
+            nhand = list(range(3))
+        print('PICK', nhand[np.random.randint(0, len(nhand))])
         turns += 1
     else:
         s = ''
