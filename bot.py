@@ -233,19 +233,19 @@ def hasTaunt(board):
     return False
 
 def getResult(v, alpha, beta):
-    if v in game_result:
-        return game_result[v]
+    if v.hash in game_result:
+        return game_result[v.hash]
 
     sum1, sum2 = 0,0
     
     if v.myHP <= 0:
-        game_result[v] = -INF
-        best_step[v] = Step(-1, -1, True)
-        return game_result[v]
+        game_result[v.hash] = -INF
+        best_step[v.hash] = Step(-1, -1, True)
+        return game_result[v.hash]
     if v.enemyHP <= 0:
-        game_result[v] = INF
-        best_step[v] = Step(-1, -1, True)
-        return game_result[v]
+        game_result[v.hash] = INF
+        best_step[v.hash] = Step(-1, -1, True)
+        return game_result[v.hash]
 
     for i in v.enemy_board:
         if i.attack > 0:
@@ -255,21 +255,21 @@ def getResult(v, alpha, beta):
             sum2 += 1
 
     if len(v.enemy_board) == 0 or len(v.my_board) == 0 or (sum1 == 0 and sum2 == 0):
-        game_result[v] = GameState.getValue(v)
-        best_step[v] = Step(-1, -1, True)
-        return game_result[v]
+        game_result[v.hash] = GameState.getValue(v)
+        best_step[v.hash] = Step(-1, -1, True)
+        return game_result[v.hash]
 
     func,mb,eb = 0,0,0
 
     if v.turn == 0:
-        game_result[v] = INF
-        best_step[v] = Step(-1, -1, True)
+        game_result[v.hash] = INF
+        best_step[v.hash] = Step(-1, -1, True)
         func = lambda x, y : x > y
         mb = [i.copy() for i in v.enemy_board]
         eb = [i.copy() for i in v.my_board]
     else:
-        game_result[v] = -INF
-        best_step[v] = Step(-1, -1, True)
+        game_result[v.hash] = -INF
+        best_step[v.hash] = Step(-1, -1, True)
         func = lambda x, y : x < y
         mb = [i.copy() for i in v.my_board]
         eb = [i.copy() for i in v.enemy_board]
@@ -281,7 +281,7 @@ def getResult(v, alpha, beta):
         if i.can_attack == 0 or i.attack == 0:
             continue
         if alpha >= beta or steps >= mx_step:
-            return game_result[v]
+            return game_result[v.hash]
 
         new_game = 0
 
@@ -289,44 +289,44 @@ def getResult(v, alpha, beta):
             if (8&j.abilities) == 0 and hasTaunt(eb):
                 continue
             if alpha >= beta or steps >= mx_step:
-                return game_result[v]
+                return game_result[v.hash]
             can_do = True
             steps += 1
             new_game = v.copy()
             new_game.attack(i.id_, j.id_)
-            if func(game_result[v], getResult(new_game, alpha, beta)):
-                game_result[v] = getResult(new_game, alpha, beta)    
-                best_step[v] = Step(i.id_, j.id_)
+            if func(game_result[v.hash], getResult(new_game, alpha, beta)):
+                game_result[v.hash] = getResult(new_game, alpha, beta)    
+                best_step[v.hash] = Step(i.id_, j.id_)
                 if v.turn == 1:
-                    alpha = max(alpha, game_result[v])
+                    alpha = max(alpha, game_result[v.hash])
                 else:
-                    beta = min(beta, game_result[v])
+                    beta = min(beta, game_result[v.hash])
 
         if not hasTaunt(eb) and steps < mx_step:
             can_do = True
             steps += 1
             new_game = v.copy()
             new_game.attackHero(i.id_)
-            if func(game_result[v], getResult(new_game, alpha, beta)):
-                game_result[v] = getResult(new_game, alpha, beta)
-                best_step[v] = Step(i.id_, -1)
+            if func(game_result[v.hash], getResult(new_game, alpha, beta)):
+                game_result[v.hash] = getResult(new_game, alpha, beta)
+                best_step[v.hash] = Step(i.id_, -1)
                 if v.turn == 1:
-                    alpha = max(alpha, game_result[v])
+                    alpha = max(alpha, game_result[v.hash])
                 else:
-                    beta = min(beta, game_result[v])
+                    beta = min(beta, game_result[v.hash])
             
         
     if not can_do:
         if one_turn:
-            game_result[v] = GameState.getValue(v)
-            best_step[v] = Step(-1, -1, True)
-            return game_result[v]
+            game_result[v.hash] = GameState.getValue(v)
+            best_step[v.hash] = Step(-1, -1, True)
+            return game_result[v.hash]
         new_game = v.copy()
         new_game.nextTurn()
-        game_result[v] = getResult(new_game, alpha, beta)
-        best_step[v] = Step(-1, -1, True)
+        game_result[v.hash] = getResult(new_game, alpha, beta)
+        best_step[v.hash] = Step(-1, -1, True)
 
-    return game_result[v]
+    return game_result[v.hash]
 
 def get_int(x):
     try:
@@ -522,10 +522,10 @@ while True:
 
         while True:
             getResult(game.copy(), -INF - 5, INF + 5)
-            if best_step[game].is_pass or game_result[game] < GameState.getValue(game):
+            if best_step[game.hash].is_pass or game_result[game.hash] < GameState.getValue(game):
                 break
 
-            s += game.doStep(best_step[game])
+            s += game.doStep(best_step[game.hash])
 
         result = makeTheMostValuePlay(game, hand, mana)
         mana -= result[0]
@@ -533,10 +533,10 @@ while True:
 
         while True:
             getResult(game.copy(), -INF - 5, INF + 5)
-            if best_step[game].is_pass or game_result[game] < GameState.getValue(game):
+            if best_step[game.hash].is_pass or game_result[game.hash] < GameState.getValue(game):
                 break
 
-            s += game.doStep(best_step[game])
+            s += game.doStep(best_step[game.hash])
 
         for i in game.my_board:
             s += ' '.join(['ATTACK', str(i.id_), str(-1), 'did i forget anything?', ';'])
