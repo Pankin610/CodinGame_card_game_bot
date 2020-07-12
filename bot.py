@@ -22,6 +22,42 @@ class Creature:
     def copy(self):
         return Creature(self.type_, self.id_, self.cost, self.attack, self.hp, self.abilities, self.can_attack, self.side)
 
+    def deal_damage(self, x):
+        if x == 0:
+            return
+        for i in range(6):
+            if self.abilities[i] == 'W':
+                self.abilities = self.abilities[:i] + '-' + self.abilities[i + 1:]
+                return
+        self.hp -= x
+
+    def castSpell(self, spell, red):
+        for i in range(6):
+            if self.abilities[i] == '-':
+                self.abilities = self.abilities[:i] + spell.abilities[i] + self.abilities[i + 1:]
+            if red and spell.abilities[i] != '-':
+                self.abilities = self.abilities[:i] + '-' + self.abilities[i + 1:]
+
+        self.attack += spell.attack
+        self.deal_damage(spell.hp)
+
+    def getValue(self):
+        result = self.hp + 0.5 + self.attack * 1.1
+        if 'W' in self.abilities:
+            result += 1.0
+            if self.attack > 4:
+                result += 0.7
+        if 'G' in self.abilities:
+            result += 0.5
+            if self.hp > 4:
+                result += 0.2
+        if 'L' in self.abilities:
+            result += 2.0
+        if self.can_attack:
+            result += 1.0
+
+        return result * 100.0
+
 class GameState:
     player_health_hash = [list(map(int, np.random.randint(0, INF, 100))), list(map(int, np.random.randint(0, INF, 100)))]
     turn_hash = list(map(int, np.random.randint(0, INF, 2)))
@@ -33,13 +69,11 @@ class GameState:
 
     @staticmethod
     def getValue(self):
-        value = int((-(50 - self.myHP)**1.1 + (50 - self.enemyHP)**1.1) / 30.0)
+        value = (-(100 - self.myHP)**1.1 + (100 - self.enemyHP)**1.1)
         for i in self.my_board:
-            value += i.hp * 100
-            value += i.attack * 100
+            value += i.getValue()
         for i in self.enemy_board:
-            value -= i.hp * 100
-            value -= i.attack * 100
+            value -= i.getValue()
         return value
 
     def __init__(self):
@@ -74,8 +108,16 @@ class GameState:
         self.hash ^= c0.__hash__()
         self.hash ^= c1.__hash__()
 
-        c0.hp -= c1.attack
-        c1.hp -= c0.attack
+        if not 'L' in c1.abilities:
+            c0.deal_damage(c1.attack)
+        else:
+            c0.deal_damage(INF)
+
+        if not 'L' in c0.abilities:
+            c1.deal_damage(c0.attack)
+        else:
+            c1.deal_damage(INF)
+
         c1.can_attack = 0
         c0.can_attack = 0
 
@@ -106,6 +148,31 @@ class GameState:
         
         self.hash ^= GameState.player_health_hash[0][self.enemyHP] ^ GameState.player_health_hash[1][self.myHP]
         self.hash ^= creature.__hash__()
+
+    def castSpell(self, spell, id_target, red = False):
+        creature = Creature(-INF, -INF, -INF, -INF, -INF, -INF, '------')
+        for i in range(len(self.enemy_board)):
+            if self.enemy_board[i].id_ == id_target:
+                creature = self.enemy_board[i]
+                del self.enemy_board[i]
+                break
+        for i in range(len(self.my_board)):
+            if self.my_board[i].id_ == id_target:
+                creature = self.my_board[i]
+                del self.my_board[i]
+                break
+        
+        self.hash ^= creature.__hash__()
+        creature.castSpell(spell, red)
+        
+
+        if creature.hp > 0:
+            if creature.side == 0:
+                self.enemy_board.append(creature)
+            else:
+                self.my_board.append(creature)
+            self.hash ^= creature.__hash__()
+
     
     def nextTurn(self):
         self.hash ^= GameState.turn_hash[self.turn]
@@ -236,22 +303,36 @@ def get_int(x):
     except:
         return x
 
-def get_id_smallest(board):
+def get_id_least_value(board, spell, red = False):
+    gain = 0
     res_id = -1
-    res_val = INF
+
     for i in board:
-        if i.hp + i.attack < res_val:
-            res_val = i.hp + i.attack
+        creature = i.copy()
+        cur_gain = -creature.getValue()
+        creature.castSpell(spell, red)
+        cur_gain += creature.getValue()
+
+        if cur_gain < gain:
+            gain = cur_gain
             res_id = i.id_
+
     return res_id
 
-def get_id_biggest(board, x = INF):
+def get_id_most_value(board, spell, red = False):
+    gain = 0
     res_id = -1
-    res_val = -INF
+
     for i in board:
-        if i.hp + i.attack > res_val and i.hp <= x:
-            res_val = i.hp + i.attack
+        creature = i.copy()
+        cur_gain = -creature.getValue()
+        creature.castSpell(spell, red)
+        cur_gain += creature.getValue()
+
+        if cur_gain > gain:
+            gain = cur_gain
             res_id = i.id_
+
     return res_id
 
 turns = 0
@@ -275,11 +356,11 @@ while True:
     for i in range(cardCount):
         cardNumber, instanceId, location, cardType, cost, attack, defense, abilities, myhealthChange, opponentHealthChange, cardDraw = list(map(get_int, input().split()))
         if location == 1:
-            my_cards.append(Creature(cardType, instanceId, cost, attack, defense, abilities,  int(location == 1)))
+            my_cards.append(Creature(cardType, instanceId, cost, attack, defense, abilities,  int(location == 1 or 'C' in abilities)))
         elif location == -1:
-            enemy_cards.append(Creature(cardType, instanceId, cost, attack, defense, abilities, int(location == 1)))
+            enemy_cards.append(Creature(cardType, instanceId, cost, attack, defense, abilities, int(location == 1 or 'C' in abilities)))
         else:
-            hand.append(Creature(cardType, instanceId, cost, attack, defense, abilities, int(location == 1)))
+            hand.append(Creature(cardType, instanceId, cost, attack, defense, abilities, int(location == 1 or 'C' in abilities)))
     
 
 
@@ -296,6 +377,10 @@ while True:
             if mana < i.cost:
                 continue
 
+            game.enemy_board = enemy_cards
+            game.my_board = my_cards
+            game.update_hash()
+
             if i.type_ == 3 and i.hp == 0:
                 continue
             if i.type_ == 3:
@@ -305,25 +390,21 @@ while True:
                     i.type_ = 1
                 
             if i.type_ == 1:
-                if get_id_smallest(my_cards) != -1:
-                    s += ' '.join(['USE', str(i.id_), str(get_id_smallest(my_cards)), ';'])
+                if get_id_most_value(game.my_board, i) != -1:
+                    s += ' '.join(['USE', str(i.id_), str(get_id_most_value(game.my_board, i)), ';'])
+                    game.castSpell(i, get_id_most_value(game.my_board, i))
                     mana -= i.cost
             else:
-                if get_id_biggest(enemy_cards, -i.hp) != -1:
-                    s += ' '.join(['USE', str(i.id_), str(get_id_smallest(enemy_cards)), ';'])
+                if get_id_least_value(game.enemy_board, i, True) != -1:
+                    s += ' '.join(['USE', str(i.id_), str(get_id_least_value(game.enemy_board, i, True)), ';'])
+                    game.castSpell(i, get_id_least_value(game.enemy_board, i, True), True)
                     mana -= i.cost
-
-        game.enemy_board = enemy_cards
-        game.my_board = my_cards
-        game.update_hash()
 
         if len(game.enemy_board) == 0:
             for i in game.my_board:
                 s += game.doStep(Step(i.id_, -1))
-            print(s)
-            continue
 
-        if len(game.enemy_board) * len(game.my_board) > 9:
+        if len(game.enemy_board) * len(game.my_board) > 10:
             mx_step = 2
         else:
             mx_step = 1000
@@ -340,7 +421,18 @@ while True:
                 continue
             if mana >= i.cost:
                 s += 'SUMMON ' + str(i.id_) + ';'
+                game.my_board.append(i)
                 mana -= i.cost
+
+        while True:
+            getResult(game.copy(), -INF - 5, INF + 5)
+            if best_step[game].is_pass:
+                break
+
+            s += game.doStep(best_step[game])
+
+        for i in game.my_board:
+            s += ' '.join(['ATTACK', str(i.id_), str(-1), ';'])
 
         print(s)
             
