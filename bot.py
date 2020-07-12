@@ -27,37 +27,38 @@ class Creature:
         return Creature(self.type_, self.id_, self.cost, self.attack, self.hp, self.abilities, self.cardDraw, self.myhealthChange, self.opponentHealthChange, self.can_attack, self.side)
 
     def deal_damage(self, x):
+        if x < 0:
+            self.hp += x
+            return
         if x == 0:
             return
-        for i in range(6):
-            if self.abilities[i] == 'W':
-                self.abilities = self.abilities[:i] + '-' + self.abilities[i + 1:]
-                return
+        if (32&self.abilities) > 0:
+            self.abilities &= (63 - 32)
+            return
         self.hp -= x
 
     def castSpell(self, spell, red):
-        for i in range(6):
-            if self.abilities[i] == '-':
-                self.abilities = self.abilities[:i] + spell.abilities[i] + self.abilities[i + 1:]
-            if red and spell.abilities[i] != '-':
-                self.abilities = self.abilities[:i] + '-' + self.abilities[i + 1:]
+        if not red:
+            self.abilities |= spell.abilities
+        else:
+            self.abilities &= (63 - spell.abilities)
 
         self.attack += spell.attack
         self.deal_damage(-spell.hp)
 
-    def getValue(self, with_attack = False):
+    def getValue(self, with_attack = 0):
         if self.hp <= 0:
             return 0
         result = self.hp + 0.5 + self.attack
-        if 'W' in self.abilities:
+        if (32&self.abilities) > 0:
             result += 1.0
             if self.attack > 4:
                 result += 0.2
-        if 'G' in self.abilities:
+        if (8&self.abilities) > 0:
             result += 0.5
             if self.hp > 4:
                 result += 0.2
-        if 'L' in self.abilities:
+        if (16&self.abilities) > 0:
             result += 2.0
         if self.can_attack * with_attack:
             result += 1.0
@@ -125,12 +126,12 @@ class GameState:
         self.hash ^= c0.__hash__()
         self.hash ^= c1.__hash__()
 
-        if not 'L' in c1.abilities:
+        if (16&c1.abilities) == 0:
             c0.deal_damage(c1.attack)
         else:
             c0.deal_damage(INF)
 
-        if not 'L' in c0.abilities:
+        if (16&c0.abilities) == 0:
             c1.deal_damage(c0.attack)
         else:
             c1.deal_damage(INF)
@@ -167,7 +168,7 @@ class GameState:
         self.hash ^= creature.__hash__()
 
     def castSpell(self, spell, id_target, red = False):
-        creature = Creature(-INF, -INF, -INF, -INF, -INF, -INF, 0, 0, 0, '------')
+        creature = Creature(-INF, -INF, -INF, -INF, -INF, -INF, 0, 0, 0, 0)
         for i in range(len(self.enemy_board)):
             if self.enemy_board[i].id_ == id_target:
                 creature = self.enemy_board[i]
@@ -227,13 +228,15 @@ game_result, best_step = {}, {}
 
 def hasTaunt(board):
     for i in board:
-        if 'G' in i.abilities:
+        if (8&i.abilities) > 0:
             return True
     return False
 
 def getResult(v, alpha, beta):
     if v in game_result:
         return game_result[v]
+
+    sum1, sum2 = 0,0
     
     if v.myHP <= 0:
         game_result[v] = -INF
@@ -244,7 +247,14 @@ def getResult(v, alpha, beta):
         best_step[v] = Step(-1, -1, True)
         return game_result[v]
 
-    if len(v.enemy_board) == 0 or len(v.my_board) == 0:
+    for i in v.enemy_board:
+        if i.attack > 0:
+            sum1 += 1
+    for i in v.my_board:
+        if i.attack > 0:
+            sum2 += 1
+
+    if len(v.enemy_board) == 0 or len(v.my_board) == 0 or (sum1 == 0 and sum2 == 0):
         game_result[v] = GameState.getValue(v)
         best_step[v] = Step(-1, -1, True)
         return game_result[v]
@@ -276,7 +286,7 @@ def getResult(v, alpha, beta):
         new_game = 0
 
         for j in eb:
-            if (not 'G' in j.abilities) and hasTaunt(eb):
+            if (8&j.abilities) == 0 and hasTaunt(eb):
                 continue
             if alpha >= beta or steps >= mx_step:
                 return game_result[v]
@@ -444,7 +454,12 @@ def makeTheMostValuePlay(game, hand, mana):
     return (manasum, s)
     
     
-            
+def parse_abilities(abilities):
+    mask = 0
+    for i in range(6):
+        if abilities[i] != '-':
+            mask |= (1 << i)
+    return mask          
         
 
 
@@ -470,12 +485,13 @@ while True:
 
     for i in range(cardCount):
         cardNumber, instanceId, location, cardType, cost, attack, defense, abilities, myhealthChange, opponentHealthChange, cardDraw = list(map(get_int, input().split()))
+        abilities = parse_abilities(abilities)
         if location == 1:
-            my_cards.append(Creature(cardType, instanceId, cost, attack, defense, abilities, cardDraw, myhealthChange, opponentHealthChange,  int(location == 1 or 'C' in abilities)))
+            my_cards.append(Creature(cardType, instanceId, cost, attack, defense, abilities, cardDraw, myhealthChange, opponentHealthChange,  int(location == 1 or (abilities&2) > 0)))
         elif location == -1:
-            enemy_cards.append(Creature(cardType, instanceId, cost, attack, defense, abilities, cardDraw, myhealthChange, opponentHealthChange, int(location == 1 or 'C' in abilities)))
+            enemy_cards.append(Creature(cardType, instanceId, cost, attack, defense, abilities, cardDraw, myhealthChange, opponentHealthChange, int(location == 1 or (abilities&2) > 0)))
         else:
-            hand.append(Creature(cardType, instanceId, cost, attack, defense, abilities, cardDraw, myhealthChange, opponentHealthChange, int(location == 1 or 'C' in abilities)))
+            hand.append(Creature(cardType, instanceId, cost, attack, defense, abilities, cardDraw, myhealthChange, opponentHealthChange, int(location == 1 or (abilities&2) > 0)))
     
 
 
@@ -496,10 +512,13 @@ while True:
             for i in game.my_board:
                 s += game.doStep(Step(i.id_, -1))
 
+        one_turn = False
+        mx_step = 10000
         if len(game.enemy_board) * len(game.my_board) > 10:
             one_turn = True
-        else:
-            one_turn = False
+            if len(game.enemy_board) * len(game.my_board) > 16:
+                mx_step = 2
+            
 
         while True:
             getResult(game.copy(), -INF - 5, INF + 5)
@@ -520,7 +539,7 @@ while True:
             s += game.doStep(best_step[game])
 
         for i in game.my_board:
-            s += ' '.join(['ATTACK', str(i.id_), str(-1), ';'])
+            s += ' '.join(['ATTACK', str(i.id_), str(-1), 'did i forget anything?', ';'])
 
         print(s)
             
