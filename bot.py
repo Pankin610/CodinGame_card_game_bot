@@ -1,82 +1,126 @@
 import numpy as np
+import math
+import sys
 
 INF = 2000000000
+BIG_INF = 2000000000000000000
 mx_step = 10000
 one_turn = False
 
-class Creature:
-    creature_hashes = {}
-
-    def __init__(self, type_, id_, cost, attack, hp, abilities, cardDraw,  myhealthChange, opponentHealthChange, can_attack = 0, side = 1):
+class Card:
+    def __init__(self, type_, id_, cost, attack, hp, abilities, cardDraw,  myhealthChange, opponentHealthChange, side, can_attack = 0):
         self.type_ = type_
         self.cost = cost
         self.attack = attack
         self.hp = hp
-        self.side = side
         self.can_attack = can_attack
         self.id_ = id_
         self.abilities = abilities
         self.cardDraw = cardDraw
         self.myhealthChange = myhealthChange
         self.opponentHealthChange = opponentHealthChange
+        self.side = side
 
     def __hash__(self):
-        return (self.attack, self.hp, self.side, self.abilities, self.can_attack).__hash__()
+        return (self.type_, self.id_, self.cost, self.attack, self.hp, self.abilities, self.cardDraw, self.myhealthChange, self.opponentHealthChange, self.side, self.can_attack).__hash__()
 
     def copy(self):
-        return Creature(self.type_, self.id_, self.cost, self.attack, self.hp, self.abilities, self.cardDraw, self.myhealthChange, self.opponentHealthChange, self.can_attack, self.side)
+        return Card(self.type_, self.id_, self.cost, self.attack, self.hp, self.abilities, self.cardDraw, self.myhealthChange, self.opponentHealthChange, self.side, self.can_attack)
 
-    def deal_damage(self, x):
-        if x < 0:
-            self.hp += x
+    def getValue(self, with_attack = 0):
+        if self.hp <= 0:
+            return 0
+        result = self.hp + 0.5 + self.attack + (self.hp * self.attack)**0.5
+        if (32&self.abilities) > 0:
+            result += 2.0
+            if self.attack > 4:
+                result += 0.4
+        if (8&self.abilities) > 0:
+            result += 1.0
+            if self.hp > 4:
+                result += 0.4
+        if (16&self.abilities) > 0:
+            result += 4.0
+        if self.can_attack * with_attack:
+            result += 2.0
+
+        return result * 100.0
+
+class Creature(Card):
+    def __init__(self, id_, attack, hp, abilities, side, can_attack = 0):
+        self.attack = attack
+        self.hp = hp
+        self.can_attack = can_attack
+        self.id_ = id_
+        self.abilities = abilities
+        self.side = side
+
+    @staticmethod
+    def make_creature(card):
+        return Creature(card.id_, card.attack, card.hp, card.abilities, card.side, card.can_attack)
+
+    def __hash__(self):
+        return (self.attack, self.hp, self.abilities, self.side, self.can_attack).__hash__()
+
+    def copy(self):
+        return Creature(self.id_, self.attack, self.hp, self.abilities, self.side, self.can_attack)
+
+    def makeAttack(self, val, game = -1):
+        if game == -1:
+            game = GameState()
+        if self.hp <= 0:
             return
+        game.hash ^= self.__hash__()
+        self.can_attack = val
+        game.hash ^= self.__hash__()
+
+    def deal_damage(self, x, game = -1):
+        if game == -1:
+            game = GameState()
         if x == 0:
             return
-        if (32&self.abilities) > 0:
-            self.abilities &= (63 - 32)
-            return
-        self.hp -= x
+        game.hash ^= self.__hash__()
 
-    def castSpell(self, spell, red):
+        if (32&self.abilities) > 0 and x < 0:
+            self.abilities &= (63 - 32)
+        else:
+            self.hp += x
+
+        if self.hp > 0:
+            game.hash ^= self.__hash__()
+
+    def castSpell(self, spell, red, game = -1):
+        if game == -1:
+            game = GameState()
+        game.hash ^= self.__hash__()
+
         if not red:
             self.abilities |= spell.abilities
         else:
             self.abilities &= (63 - spell.abilities)
 
         self.attack += spell.attack
-        self.deal_damage(-spell.hp)
 
-    def getValue(self, with_attack = 0):
-        if self.hp <= 0:
-            return 0
-        result = self.hp + 0.5 + self.attack
-        if (32&self.abilities) > 0:
-            result += 1.0
-            if self.attack > 4:
-                result += 0.2
-        if (8&self.abilities) > 0:
-            result += 0.5
-            if self.hp > 4:
-                result += 0.2
-        if (16&self.abilities) > 0:
-            result += 2.0
-        if self.can_attack * with_attack:
-            result += 1.0
+        game.hash ^= self.__hash__()
 
-        return result * 100.0
+        self.deal_damage(spell.hp, game)
 
 class GameState:
-    player_health_hash = [list(map(int, np.random.randint(0, INF, 100))), list(map(int, np.random.randint(0, INF, 100)))]
-    turn_hash = list(map(int, np.random.randint(0, INF, 2)))
+    player_health_hash = [list(map(int, np.random.randint(0, BIG_INF, 100, dtype=np.int64))), list(map(int, np.random.randint(0, BIG_INF, 100, dtype=np.int64)))]
+    turn_hash = list(map(int, np.random.randint(0, BIG_INF, 2, dtype=np.int64)))
 
     def __eq__(self, other):
+        if type(other) != type(self):
+            return False
         return self.hash == other.hash
     def __ne__(self, other):
+        if type(other) != type(self):
+            return True
         return self.hash != other.hash
 
     @staticmethod
     def getValue(self):
-        value = (-(100 - self.myHP)**1.15 + (100 - self.enemyHP)**1.15)
+        value = (math.log(self.myHero.hp) - math.log(self.enemyHero.hp)) * 100.0
         for i in self.my_board:
             value += i.getValue()
         for i in self.enemy_board:
@@ -84,28 +128,31 @@ class GameState:
         return value
 
     def __init__(self):
-        self.enemyHP, self.myHP = 30, 30
-        self.my_board, self.enemy_board = [], []
         self.turn = 1
-        self.hash = GameState.player_health_hash[0][30] ^ GameState.player_health_hash[1][30] ^ GameState.turn_hash[self.turn]
+
+        self.myHero = Creature(-610, 0, 30, 1, 0)
+        self.enemyHero = Creature(-717, 0, 30, 0, 0)
+
+        self.my_board, self.enemy_board = [self.myHero], [self.enemyHero]
+
+        self.hash = 0
+        self.update_hash()
 
     def __hash__(self):
         return self.hash
 
     def update_hash(self):
-        self.hash = GameState.player_health_hash[0][self.enemyHP] ^ GameState.player_health_hash[1][self.myHP] ^ GameState.turn_hash[self.turn]
+        self.hash = 0
+        self.hash ^= self.turn_hash[self.turn]
         for i in (self.enemy_board + self.my_board):
             self.hash ^= i.__hash__()
 
-    def summon(self, minion):
+    def summon(self, minion_card):
+        self.enemyHero.deal_damage(minion_card.opponentHealthChange, self)
+        self.myHero.deal_damage(minion_card.myhealthChange, self)
+
+        minion = Creature.make_creature(minion_card)
         self.hash ^= minion.__hash__()
-        self.hash ^= GameState.player_health_hash[0][self.enemyHP] ^ GameState.player_health_hash[1][self.myHP] ^ GameState.turn_hash[self.turn]
-
-        self.enemyHP += minion.opponentHealthChange
-        self.myHP += minion.myhealthChange
-
-        self.hash ^= GameState.player_health_hash[0][self.enemyHP] ^ GameState.player_health_hash[1][self.myHP] ^ GameState.turn_hash[self.turn]
-
         self.my_board.append(minion)
 
     def attack(self, id0, id1):
@@ -114,108 +161,78 @@ class GameState:
         c0, c1 = 0,0
         for i in range(len(self.enemy_board)):
             if self.enemy_board[i].id_ == id0:
-                c0 = self.enemy_board[i].copy()
-                del self.enemy_board[i]
+                c0 = self.enemy_board[i]
+                self.enemy_board = self.enemy_board[:i] + self.enemy_board[i + 1:]
                 break
         for i in range(len(self.my_board)):
             if self.my_board[i].id_ == id1:
-                c1 = self.my_board[i].copy()
-                del self.my_board[i]
+                c1 = self.my_board[i]
+                self.my_board = self.my_board[:i] + self.my_board[i + 1:]
                 break
 
-        self.hash ^= c0.__hash__()
-        self.hash ^= c1.__hash__()
 
         if (16&c1.abilities) == 0:
-            c0.deal_damage(c1.attack)
+            c0.deal_damage(-c1.attack, self)
         else:
-            c0.deal_damage(INF)
+            c0.deal_damage(-INF, self)
 
         if (16&c0.abilities) == 0:
-            c1.deal_damage(c0.attack)
+            c1.deal_damage(-c0.attack, self)
         else:
-            c1.deal_damage(INF)
+            c1.deal_damage(-INF, self)
 
-        c1.can_attack = 0
-        c0.can_attack = 0
+        c1.makeAttack(0, self)
+        c0.makeAttack(0, self)
 
         if c0.hp > 0:
-            self.hash ^= c0.__hash__()
             self.enemy_board.append(c0)
         if c1.hp > 0:
-            self.hash ^= c1.__hash__()
             self.my_board.append(c1)
     
-    def attackHero(self, id_):
-        creature = 0
-        for i in range(len(self.enemy_board)):
-            if self.enemy_board[i].id_ == id_:
-                creature = self.enemy_board[i]
-        for i in range(len(self.my_board)):
-            if self.my_board[i].id_ == id_:
-                creature = self.my_board[i]
-
-        self.hash ^= GameState.player_health_hash[0][self.enemyHP] ^ GameState.player_health_hash[1][self.myHP]
-        self.hash ^= creature.__hash__()
-        creature.can_attack = 0
-
-        if creature.side == 0:
-            self.myHP -= creature.attack
-        else:
-            self.enemyHP -= creature.attack
-        
-        self.hash ^= GameState.player_health_hash[0][self.enemyHP] ^ GameState.player_health_hash[1][self.myHP]
-        self.hash ^= creature.__hash__()
-
     def castSpell(self, spell, id_target, red = False):
-        creature = Creature(-INF, -INF, -INF, -INF, -INF, -INF, 0, 0, 0, 0)
+        creature = Creature(-INF, 0, 0, 0, 0)
         for i in range(len(self.enemy_board)):
             if self.enemy_board[i].id_ == id_target:
                 creature = self.enemy_board[i]
-                del self.enemy_board[i]
+                self.enemy_board = self.enemy_board[:i] + self.enemy_board[i + 1:]
                 break
         for i in range(len(self.my_board)):
             if self.my_board[i].id_ == id_target:
                 creature = self.my_board[i]
-                del self.my_board[i]
+                self.my_board = self.my_board[:i] + self.my_board[i + 1:]
                 break
         
-        self.hash ^= creature.__hash__()
-        creature.castSpell(spell, red)
+        creature.castSpell(spell, red, self)
         
-
         if creature.hp > 0:
             if creature.side == 0:
                 self.enemy_board.append(creature)
             else:
                 self.my_board.append(creature)
-            self.hash ^= creature.__hash__()
 
     
     def nextTurn(self):
         self.hash ^= GameState.turn_hash[self.turn]
         self.turn ^= 1
+        self.hash ^= GameState.turn_hash[self.turn]
 
         for i in range(len(self.enemy_board)):
-            self.enemy_board[i].can_attack = 1
+            self.enemy_board[i].makeAttack(1, self)
         for i in range(len(self.my_board)):
-            self.my_board[i].can_attack = 1
+            self.my_board[i].makeAttack(1, self)
 
     def doStep(self, st):
         if st.is_pass:
             self.nextTurn()
             return 'PASS;'
 
-        if st.target == -1:
-            self.attackHero(st.attacker)
-        else:
-            self.attack(st.attacker, st.target)
+        self.attack(st.attacker, st.target)
 
-        return ' '.join(['ATTACK', str(st.attacker), str(st.target), ';'])
+        return ' '.join(['ATTACK', str(st.attacker), str(st.target) if st.target >= 0 else -1, ';'])
 
     def copy(self):
         res = GameState()
-        res.hash, res.my_board, res.enemy_board, res.myHP, res.enemyHP, res.turn = self.hash, [i.copy() for i in self.my_board], [i.copy() for i in self.enemy_board], self.myHP, self.enemyHP, self.turn
+        res.hash, res.my_board, res.enemy_board, res.turn = self.hash, [i.copy() for i in self.my_board], [i.copy() for i in self.enemy_board], self.turn
         return res
 
 class Step:
@@ -238,11 +255,11 @@ def getResult(v, alpha, beta):
 
     sum1, sum2 = 0,0
     
-    if v.myHP <= 0:
+    if v.myHero.hp <= 0:
         game_result[v.hash] = -INF
         best_step[v.hash] = Step(-1, -1, True)
         return game_result[v.hash]
-    if v.enemyHP <= 0:
+    if v.enemyHero.hp <= 0:
         game_result[v.hash] = INF
         best_step[v.hash] = Step(-1, -1, True)
         return game_result[v.hash]
@@ -301,20 +318,6 @@ def getResult(v, alpha, beta):
                     alpha = max(alpha, game_result[v.hash])
                 else:
                     beta = min(beta, game_result[v.hash])
-
-        if not hasTaunt(eb) and steps < mx_step:
-            can_do = True
-            steps += 1
-            new_game = v.copy()
-            new_game.attackHero(i.id_)
-            if func(game_result[v.hash], getResult(new_game, alpha, beta)):
-                game_result[v.hash] = getResult(new_game, alpha, beta)
-                best_step[v.hash] = Step(i.id_, -1)
-                if v.turn == 1:
-                    alpha = max(alpha, game_result[v.hash])
-                else:
-                    beta = min(beta, game_result[v.hash])
-            
         
     if not can_do:
         if one_turn:
@@ -461,16 +464,17 @@ def parse_abilities(abilities):
             mask |= (1 << i)
     return mask          
         
+def parse_creautures(cards):
+    return [Creature(i.id_, i.attack, i.hp, i.abilities, i.side, i.can_attack) for i in cards]
 
-
-############################################################################
+########################################################################################################################################
 
 turns = 0
 trash = set([55, 63, 83, 91, 92, 100, 110, 24, 31, 57, 2, 10, 42, 81, 89, 90, 108, 107, 113, 20])
 exceptions = set([150, 151, 158])
 
 mc = [0] * 20
-coef = [1.1, 0.7, 0.5, 0.5, 0.6, 0.7, 1.0, 1.1, 1.3, 1.3, 1.3, 1.3, 1.3, 1.3, 1.3, 1.3, 1.3, 1.3, 1.3, 1.3, 1.3, 1.3, 1.3]
+coef = [1.0, 0.7, 0.5, 0.5, 0.7, 0.7, 1.0, 1.1, 1.1, 1.1, 1.1, 1.1, 1.1, 1.1, 1.3, 1.3, 1.3, 1.3, 1.3, 1.3, 1.3, 1.3, 1.3]
 
 while True:
     game_result, best_step = {}, {}
@@ -494,11 +498,11 @@ while True:
         cardNumber, instanceId, location, cardType, cost, attack, defense, abilities, myhealthChange, opponentHealthChange, cardDraw = list(map(get_int, input().split()))
         abilities = parse_abilities(abilities)
         if location == 1:
-            my_cards.append(Creature(cardType, instanceId, cost, attack, defense, abilities, cardDraw, myhealthChange, opponentHealthChange,  int(location == 1 or (abilities&2) > 0)))
+            my_cards.append(Card(cardType, instanceId, cost, attack, defense, abilities, cardDraw, myhealthChange, opponentHealthChange, 1,  int(location == 1 or (abilities&2) > 0)))
         elif location == -1:
-            enemy_cards.append(Creature(cardType, instanceId, cost, attack, defense, abilities, cardDraw, myhealthChange, opponentHealthChange, int(location == 1 or (abilities&2) > 0)))
+            enemy_cards.append(Card(cardType, instanceId, cost, attack, defense, abilities, cardDraw, myhealthChange, opponentHealthChange, 0, int(location == 1 or (abilities&2) > 0)))
         else:
-            hand.append(Creature(cardType, instanceId, cost, attack, defense, abilities, cardDraw, myhealthChange, opponentHealthChange, int(location == 1 or (abilities&2) > 0)))
+            hand.append(Card(cardType, instanceId, cost, attack, defense, abilities, cardDraw, myhealthChange, opponentHealthChange, 1, int(location == 1 or (abilities&2) > 0)))
             nums.append(cardNumber)
     
 
@@ -519,7 +523,7 @@ while True:
                 best_opt = i
                 exceptions.discard(nums[i])
                 break
-            ad = hand[i].getValue(True) / max(1, hand[i].cost) + hand[i].cardDraw * 1.5
+            ad = hand[i].getValue(True) / max(1, hand[i].cost) + hand[i].cardDraw * 3.0 * 100.0
             mc[min(hand[i].cost, 8)] += 1
             ad -= sum(mc[i] * mc[i] * coef[i] for i in range(len(mc))) * 70.0
             mc[min(hand[i].cost, 8)] -= 1
@@ -533,17 +537,13 @@ while True:
         turns += 1
     else:
         s = ''
-        game.enemy_board = enemy_cards
-        game.my_board = my_cards
+        game.enemy_board = parse_creautures(enemy_cards)
+        game.my_board = parse_creautures(my_cards)
         game.update_hash()
         
         result = makeTheMostValuePlay(game, hand, mana)
         mana -= result[0]
         s += result[1]
-
-        if len(game.enemy_board) == 0:
-            for i in game.my_board:
-                s += game.doStep(Step(i.id_, -1))
 
         one_turn = False
         mx_step = 10000
@@ -575,10 +575,3 @@ while True:
             s += ' '.join(['ATTACK', str(i.id_), str(-1), 'did i forget anything?', ';'])
 
         print(s)
-            
-
-
-
-
-
-
