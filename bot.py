@@ -44,6 +44,9 @@ class Card:
         if self.can_attack * with_attack:
             result += 2.0
 
+        if self.abilities == 63:
+            result += 20.0
+
         return result * 100.0
 
 class Creature(Card):
@@ -120,6 +123,13 @@ class GameState:
 
     @staticmethod
     def getValue(self):
+        if self.myHero.hp <= 0:
+            return -INF - 1
+        if self.enemyHero.hp <= 0:
+            return INF + 1
+
+        value = 0
+
         value = (math.log(self.myHero.hp) - math.log(self.enemyHero.hp)) * 100.0
         for i in self.my_board:
             value += i.getValue()
@@ -131,7 +141,7 @@ class GameState:
         self.turn = 1
 
         self.myHero = Creature(-610, 0, 30, 1, 0)
-        self.enemyHero = Creature(-717, 0, 30, 0, 0)
+        self.enemyHero = Creature(-1, 0, 30, 0, 0)
 
         self.my_board, self.enemy_board = [self.myHero], [self.enemyHero]
 
@@ -228,12 +238,48 @@ class GameState:
 
         self.attack(st.attacker, st.target)
 
-        return ' '.join(['ATTACK', str(st.attacker), str(st.target) if st.target >= 0 else -1, ';'])
+        return ' '.join(['ATTACK', str(st.attacker), str(st.target if st.target >= 0 else -1), ';'])
 
     def copy(self):
         res = GameState()
         res.hash, res.my_board, res.enemy_board, res.turn = self.hash, [i.copy() for i in self.my_board], [i.copy() for i in self.enemy_board], self.turn
         return res
+
+    def getMoves(self):
+        mb = [i.copy() for i in self.enemy_board]
+        eb = [i.copy() for i in self.my_board]
+        if self.turn == 1:
+            mb, eb = eb, mb
+        
+        moves = []
+        for creature in mb:
+            if creature.can_attack == 0 or creature.attack == 0:
+                continue
+            for enemy in eb:
+                if (8&enemy.abilities) == 0 and hasTaunt(eb):
+                    continue
+                new_game = self.copy()
+                new_game.attack(creature.id_, enemy.id_)
+                moves += [' '.join(['ATTACK', str(creature.id_), str(enemy.id_ if enemy.id_ >= 0 else -1), ';', i]) for i in new_game.getMoves()]
+        
+        if len(moves) == 0:
+            moves = ['PASS']
+        
+        return moves
+
+    def makeMove(self, move):
+        commands = [i.split(' ') for i in move.split(';')]
+        for command in commands:
+            if command[0] == 'ATTACK':
+                self.attack(int(command[1]), int(command[2]))
+            else:
+                self.nextTurn()
+                
+
+
+
+        
+
 
 class Step:
     def __init__(self, attacker, target, is_pass=False):
@@ -293,6 +339,23 @@ def getResult(v, alpha, beta):
         
     can_do = False
     steps = 0
+
+    '''
+    for move in v.getMoves():
+        if alpha >= beta or steps >= mx_step:
+            return game_result[v.hash]
+
+        steps += 1
+        new_game = v.copy()
+        new_game.makeMove(move)
+        if func(game_result[v.hash], getResult(new_game, alpha, beta)):
+            game_result[v.hash] = getResult(new_game, alpha, beta)    
+            best_move[v.hash] = move
+            if v.turn == 1:
+                alpha = max(alpha, game_result[v.hash])
+            else:
+                beta = min(beta, game_result[v.hash])
+    '''
 
     for i in mb:
         if i.can_attack == 0 or i.attack == 0:
@@ -482,10 +545,10 @@ while True:
     u = 0
 
     inp = input().split()
-    game.myHP = int(inp[0])
+    game.myHero.hp = int(inp[0])
     mana = int(inp[1])
     inp = input().split()
-    game.enemyHP = int(inp[0])
+    game.enemyHero.hp = int(inp[0])
 
     for i in range(int(input().split()[1])):
         input()
@@ -505,8 +568,6 @@ while True:
             hand.append(Card(cardType, instanceId, cost, attack, defense, abilities, cardDraw, myhealthChange, opponentHealthChange, 1, int(location == 1 or (abilities&2) > 0)))
             nums.append(cardNumber)
     
-
-
     if turns < 30:
         nhand = []
         for i in range(3):
@@ -540,6 +601,15 @@ while True:
         game.enemy_board = parse_creautures(enemy_cards)
         game.my_board = parse_creautures(my_cards)
         game.update_hash()
+
+        if not hasTaunt(game.enemy_board) and sum(creature.attack * creature.can_attack for creature in game.my_board) >= game.enemyHero.hp:
+            for i in game.my_board:
+                s += ' '.join(['ATTACK', str(i.id_), str(-1), 'Lethal', ';'])
+            print(s)
+            continue
+
+        #if len(game.enemy_board) * len(game.my_board) >= 4:
+        #    print(str(game.getMoves()))
         
         result = makeTheMostValuePlay(game, hand, mana)
         mana -= result[0]
