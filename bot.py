@@ -1,6 +1,8 @@
 import numpy as np
 import math
 import sys
+import heapq
+import time
 
 INF = 2000000000
 BIG_INF = 2000000000000000000
@@ -43,9 +45,6 @@ class Card:
             result += 4.0
         if self.can_attack * with_attack:
             result += 2.0
-
-        if self.abilities == 63:
-            result += 20.0
 
         return result * 100.0
 
@@ -245,42 +244,6 @@ class GameState:
         res.hash, res.my_board, res.enemy_board, res.turn = self.hash, [i.copy() for i in self.my_board], [i.copy() for i in self.enemy_board], self.turn
         return res
 
-    def getMoves(self):
-        mb = [i.copy() for i in self.enemy_board]
-        eb = [i.copy() for i in self.my_board]
-        if self.turn == 1:
-            mb, eb = eb, mb
-        
-        moves = []
-        for creature in mb:
-            if creature.can_attack == 0 or creature.attack == 0:
-                continue
-            for enemy in eb:
-                if (8&enemy.abilities) == 0 and hasTaunt(eb):
-                    continue
-                new_game = self.copy()
-                new_game.attack(creature.id_, enemy.id_)
-                moves += [' '.join(['ATTACK', str(creature.id_), str(enemy.id_ if enemy.id_ >= 0 else -1), ';', i]) for i in new_game.getMoves()]
-        
-        if len(moves) == 0:
-            moves = ['PASS']
-        
-        return moves
-
-    def makeMove(self, move):
-        commands = [i.split(' ') for i in move.split(';')]
-        for command in commands:
-            if command[0] == 'ATTACK':
-                self.attack(int(command[1]), int(command[2]))
-            else:
-                self.nextTurn()
-                
-
-
-
-        
-
-
 class Step:
     def __init__(self, attacker, target, is_pass=False):
         self.attacker = attacker
@@ -339,23 +302,6 @@ def getResult(v, alpha, beta):
         
     can_do = False
     steps = 0
-
-    '''
-    for move in v.getMoves():
-        if alpha >= beta or steps >= mx_step:
-            return game_result[v.hash]
-
-        steps += 1
-        new_game = v.copy()
-        new_game.makeMove(move)
-        if func(game_result[v.hash], getResult(new_game, alpha, beta)):
-            game_result[v.hash] = getResult(new_game, alpha, beta)    
-            best_move[v.hash] = move
-            if v.turn == 1:
-                alpha = max(alpha, game_result[v.hash])
-            else:
-                beta = min(beta, game_result[v.hash])
-    '''
 
     for i in mb:
         if i.can_attack == 0 or i.attack == 0:
@@ -530,6 +476,133 @@ def parse_abilities(abilities):
 def parse_creautures(cards):
     return [Creature(i.id_, i.attack, i.hp, i.abilities, i.side, i.can_attack) for i in cards]
 
+class MonteCarloVertex:
+    def __le__(self, other):
+        return self.state_estimate >= other.state_estimate
+    def __lt__(self, other):
+        return self.state_estimate > other.state_estimate
+
+    @staticmethod
+    def getMoves(game_state):
+        if game_state.enemyHero.hp <= 0 or game_state.myHero.hp <= 0:
+            return []
+
+        moves = []
+
+        mb = game_state.my_board
+        eb = game_state.enemy_board
+        if game_state.turn == 0:
+            mb, eb = eb, mb
+
+        for ally in mb:
+            if ally.can_attack == 0 or ally.attack == 0:
+                continue
+            for enemy in eb:
+                if (enemy.abilities&8) == 0 and hasTaunt(eb):
+                    continue
+                moves.append(Step(ally.id_, enemy.id_))
+
+        if moves == []:
+            moves = [Step(-1, -1, True)]
+
+        return moves
+
+    def __init__(self, game_state, ancestor = -1):
+        self.ancestor = ancestor
+        self.game_state = game_state
+        
+        self.state_estimate = GameState.getValue(game_state)
+        
+        self.moves = MonteCarloVertex.getMoves(game_state)
+        self.sons = []
+
+        np.random.shuffle(self.moves)
+
+    def updateEstimate(self, node_heap):
+        if self.game_state.turn == 1:
+            self.state_estimate = max(i.state_estimate for i in self.sons)
+        else:
+            self.state_estimate = min(i.state_estimate for i in self.sons)
+
+        if self.moves:
+            heapq.heappush(node_heap, (-self.state_estimate, self))
+
+        if type(self.ancestor) == type(-1):
+            return
+        self.ancestor.updateEstimate(node_heap)
+
+class MonteCarloTree:
+    def addVertex(self, game_state, ancestor = -1):
+        if not game_state.hash in self.vertexes:
+            self.vertexes[game_state.hash] = MonteCarloVertex(game_state, ancestor)
+        return self.vertexes[game_state.hash]
+    def __init__(self, game_state):
+        self.vertexes = {}
+        self.root = self.addVertex(game_state)
+        self.expandable_nodes = []
+        heapq.heappush(self.expandable_nodes, (-self.root.state_estimate, self.root))
+
+    def expand(self):
+        if not self.expandable_nodes:
+            return
+        val, node = heapq.heappop(self.expandable_nodes)
+        val = -val
+        if not node.moves or val != node.state_estimate:
+            self.expand()
+            return
+
+        move = node.moves.pop()
+        new_game = node.game_state.copy()
+        new_game.doStep(move)
+
+        new_son = self.addVertex(new_game, node)
+        node.sons.append((move, new_son))
+
+        node.updateEstimate(self.expandable_nodes)
+
+        if node.moves:
+            heapq.heappush(self.expandable_nodes, (-node.state_estimate, node))
+        if new_son.moves:
+            heapq.heappush(self.expandable_nodes, (-new_son.state_estimate, new_son))
+
+def MiniMaxPlay(game):
+    s = ''
+    while True:
+        getResult(game.copy(), -INF - 5, INF + 5)
+        if best_step[game.hash].is_pass or game_result[game.hash] < GameState.getValue(game):
+            break
+
+        s += game.doStep(best_step[game.hash])
+
+    return s
+
+def MonteCarloPlay(game):
+    Tree = MonteCarloTree(game)
+
+    start = time.time()
+    while time.time() - start < 0.07:
+        Tree.expand()
+
+    s = ''
+    cur_node = Tree.root
+    while cur_node.sons:
+        best_val = -INF - 5
+        best_son = -1
+        best_step = -1
+
+        for step, son in cur_node.sons:
+            if son.state_estimate > best_val:
+                best_val, best_son, best_step = son.state_estimate, son, step
+        
+        if best_val == INF - 5 or best_step.is_pass:
+            break
+        s += game.doStep(best_step)
+        cur_node = best_son
+
+    return s
+        
+        
+
 ########################################################################################################################################
 
 turns = 0
@@ -615,33 +688,19 @@ while True:
         mana -= result[0]
         s += result[1]
 
-        one_turn = False
-        mx_step = 10000
-        if len(game.enemy_board) * len(game.my_board) > 10:
-            one_turn = True
-            if len(game.enemy_board) * len(game.my_board) > 16:
-                mx_step = 2
-            
-
-        while True:
-            getResult(game.copy(), -INF - 5, INF + 5)
-            if best_step[game.hash].is_pass or game_result[game.hash] < GameState.getValue(game):
-                break
-
-            s += game.doStep(best_step[game.hash])
+        if sum(i.can_attack for i in game.enemy_board) * sum(i.can_attack for i in game.my_board) > 10:
+            s += MonteCarloPlay(game)
+        else:
+            s += MiniMaxPlay(game)
 
         result = makeTheMostValuePlay(game, hand, mana)
         mana -= result[0]
         s += result[1]
 
-        while True:
-            getResult(game.copy(), -INF - 5, INF + 5)
-            if best_step[game.hash].is_pass or game_result[game.hash] < GameState.getValue(game):
-                break
-
-            s += game.doStep(best_step[game.hash])
-
         for i in game.my_board:
             s += ' '.join(['ATTACK', str(i.id_), str(-1), 'did i forget anything?', ';'])
+        
+        if s == '':
+            s = 'PASS'
 
         print(s)
