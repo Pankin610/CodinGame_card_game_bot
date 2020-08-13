@@ -520,9 +520,9 @@ class MonteCarloVertex:
 
     def updateEstimate(self, node_heap):
         if self.game_state.turn == 1:
-            self.state_estimate = max(i.state_estimate for i in self.sons)
+            self.state_estimate = max(i[1].state_estimate for i in self.sons)
         else:
-            self.state_estimate = min(i.state_estimate for i in self.sons)
+            self.state_estimate = min(i[1].state_estimate for i in self.sons)
 
         if self.moves:
             heapq.heappush(node_heap, (-self.state_estimate, self))
@@ -609,9 +609,6 @@ turns = 0
 trash = set([55, 63, 83, 91, 92, 100, 110, 24, 31, 57, 2, 10, 42, 81, 89, 90, 108, 107, 113, 20])
 exceptions = set([150, 151, 158])
 
-mc = [0] * 20
-coef = [1.0, 0.7, 0.5, 0.5, 0.7, 0.7, 1.0, 1.1, 1.1, 1.1, 1.1, 1.1, 1.1, 1.1, 1.3, 1.3, 1.3, 1.3, 1.3, 1.3, 1.3, 1.3, 1.3]
-
 while True:
     game_result, best_step = {}, {}
     game = GameState()
@@ -658,9 +655,6 @@ while True:
                 exceptions.discard(nums[i])
                 break
             ad = hand[i].getValue(True) / max(1, hand[i].cost) + hand[i].cardDraw * 3.0 * 100.0
-            mc[min(hand[i].cost, 8)] += 1
-            ad -= sum(mc[i] * mc[i] * coef[i] for i in range(len(mc))) * 70.0
-            mc[min(hand[i].cost, 8)] -= 1
 
             if ad > best_ad:
                 best_ad = ad
@@ -689,6 +683,8 @@ while True:
         s += result[1]
 
         if sum(i.can_attack for i in game.enemy_board) * sum(i.can_attack for i in game.my_board) > 10:
+            game.my_board.append(game.myHero)
+            game.enemy_board.append(game.enemyHero)
             s += MonteCarloPlay(game)
         else:
             s += MiniMaxPlay(game)
