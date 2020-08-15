@@ -10,7 +10,7 @@ mx_step = 10000
 one_turn = False
 
 class Card:
-    def __init__(self, type_, id_, cost, attack, hp, abilities, cardDraw,  myhealthChange, opponentHealthChange, side, can_attack = 0):
+    def __init__(self, num, type_, id_, cost, attack, hp, abilities, cardDraw,  myhealthChange, opponentHealthChange, side, can_attack = 0):
         self.type_ = type_
         self.cost = cost
         self.attack = attack
@@ -22,12 +22,13 @@ class Card:
         self.myhealthChange = myhealthChange
         self.opponentHealthChange = opponentHealthChange
         self.side = side
+        self.num = num
 
     def __hash__(self):
-        return (self.type_, self.id_, self.cost, self.attack, self.hp, self.abilities, self.cardDraw, self.myhealthChange, self.opponentHealthChange, self.side, self.can_attack).__hash__()
+        return (self.num, self.type_, self.id_, self.cost, self.attack, self.hp, self.abilities, self.cardDraw, self.myhealthChange, self.opponentHealthChange, self.side, self.can_attack).__hash__()
 
     def copy(self):
-        return Card(self.type_, self.id_, self.cost, self.attack, self.hp, self.abilities, self.cardDraw, self.myhealthChange, self.opponentHealthChange, self.side, self.can_attack)
+        return Card(self.num, self.type_, self.id_, self.cost, self.attack, self.hp, self.abilities, self.cardDraw, self.myhealthChange, self.opponentHealthChange, self.side, self.can_attack)
 
     def getValue(self, with_attack = 0):
         if self.hp <= 0:
@@ -231,7 +232,7 @@ class GameState:
             self.my_board[i].makeAttack(1, self)
 
     def doStep(self, st):
-        if st.is_pass:
+        if st.attacker == -1:
             self.nextTurn()
             return 'PASS;'
 
@@ -245,10 +246,9 @@ class GameState:
         return res
 
 class Step:
-    def __init__(self, attacker, target, is_pass=False):
+    def __init__(self, attacker, target):
         self.attacker = attacker
         self.target = target
-        self.is_pass = is_pass
 
 game_result, best_step = {}, {}
 
@@ -266,11 +266,11 @@ def getResult(v, alpha, beta):
     
     if v.myHero.hp <= 0:
         game_result[v.hash] = -INF
-        best_step[v.hash] = Step(-1, -1, True)
+        best_step[v.hash] = Step(-1, -1)
         return game_result[v.hash]
     if v.enemyHero.hp <= 0:
         game_result[v.hash] = INF
-        best_step[v.hash] = Step(-1, -1, True)
+        best_step[v.hash] = Step(-1, -1)
         return game_result[v.hash]
 
     for i in v.enemy_board:
@@ -282,20 +282,20 @@ def getResult(v, alpha, beta):
 
     if len(v.enemy_board) == 0 or len(v.my_board) == 0 or (sum1 == 0 and sum2 == 0):
         game_result[v.hash] = GameState.getValue(v)
-        best_step[v.hash] = Step(-1, -1, True)
+        best_step[v.hash] = Step(-1, -1)
         return game_result[v.hash]
 
     func,mb,eb = 0,0,0
 
     if v.turn == 0:
         game_result[v.hash] = INF
-        best_step[v.hash] = Step(-1, -1, True)
+        best_step[v.hash] = Step(-1, -1)
         func = lambda x, y : x > y
         mb = [i.copy() for i in v.enemy_board]
         eb = [i.copy() for i in v.my_board]
     else:
         game_result[v.hash] = -INF
-        best_step[v.hash] = Step(-1, -1, True)
+        best_step[v.hash] = Step(-1, -1)
         func = lambda x, y : x < y
         mb = [i.copy() for i in v.my_board]
         eb = [i.copy() for i in v.enemy_board]
@@ -331,12 +331,12 @@ def getResult(v, alpha, beta):
     if not can_do:
         if one_turn:
             game_result[v.hash] = GameState.getValue(v)
-            best_step[v.hash] = Step(-1, -1, True)
+            best_step[v.hash] = Step(-1, -1)
             return game_result[v.hash]
         new_game = v.copy()
         new_game.nextTurn()
         game_result[v.hash] = getResult(new_game, alpha, beta)
-        best_step[v.hash] = Step(-1, -1, True)
+        best_step[v.hash] = Step(-1, -1)
 
     return game_result[v.hash]
 
@@ -503,7 +503,7 @@ class MonteCarloVertex:
                 moves.append(Step(ally.id_, enemy.id_))
 
         if moves == []:
-            moves = [Step(-1, -1, True)]
+            moves = [Step(-1, -1)]
 
         return moves
 
@@ -569,7 +569,7 @@ def MiniMaxPlay(game):
     s = ''
     while True:
         getResult(game.copy(), -INF - 5, INF + 5)
-        if best_step[game.hash].is_pass or game_result[game.hash] < GameState.getValue(game):
+        if best_step[game.hash].attacker == -1 or game_result[game.hash] < GameState.getValue(game):
             break
 
         s += game.doStep(best_step[game.hash])
@@ -594,20 +594,21 @@ def MonteCarloPlay(game):
             if son.state_estimate > best_val:
                 best_val, best_son, best_step = son.state_estimate, son, step
         
-        if best_val == INF - 5 or best_step.is_pass:
+        if best_val == INF - 5 or best_step.attacker == -1:
             break
         s += game.doStep(best_step)
         cur_node = best_son
 
     return s
         
-        
-
 ########################################################################################################################################
 
 turns = 0
-trash = set([55, 63, 83, 91, 92, 100, 110, 24, 31, 57, 2, 10, 42, 81, 89, 90, 108, 107, 113, 20])
-exceptions = set([150, 151, 158])
+card_list = [69, 116, 7, 65, 15, 17, 53, 9, 68, 67, 3, 151, 49, 103, 95, 8, 96, 26, 6, 99, 105, 19, 109, 80, 23, 62, 44, 114, 37, 150, 51, 36, 158, 111, 106, 75, 73, 79, 119, 118, 91, 152, 12, 104, 97, 64, 48, 38, 77, 59, 34, 112, 
+82, 61, 33, 32, 98, 21, 29, 83, 87, 45, 144, 66, 28, 27, 58, 76, 60, 22, 52, 135, 148, 18, 84, 43, 101, 85, 120, 121, 40, 129, 128, 46, 115, 142, 39, 47, 50, 94, 108, 74, 71, 131, 72, 70, 100, 102, 86, 130, 88, 54, 122, 155, 93, 1, 107, 11, 41, 137, 4, 138, 42, 2, 56, 132, 25, 24, 117, 160, 154, 140, 153, 123, 149, 13, 125, 35, 159, 126, 134, 10, 31, 16, 57, 133, 127, 145, 92, 5, 136, 157, 30, 113, 89, 124, 20, 146, 147, 81, 78, 90, 143, 156, 141, 14, 55, 139, 63, 110]
+pos = {}
+for i in range(len(card_list)):
+    pos[card_list[i]] = i
 
 while True:
     game_result, best_step = {}, {}
@@ -631,37 +632,26 @@ while True:
         cardNumber, instanceId, location, cardType, cost, attack, defense, abilities, myhealthChange, opponentHealthChange, cardDraw = list(map(get_int, input().split()))
         abilities = parse_abilities(abilities)
         if location == 1:
-            my_cards.append(Card(cardType, instanceId, cost, attack, defense, abilities, cardDraw, myhealthChange, opponentHealthChange, 1,  int(location == 1 or (abilities&2) > 0)))
+            my_cards.append(Card(cardNumber, cardType, instanceId, cost, attack, defense, abilities, cardDraw, myhealthChange, opponentHealthChange, 1,  int(location == 1 or (abilities&2) > 0)))
         elif location == -1:
-            enemy_cards.append(Card(cardType, instanceId, cost, attack, defense, abilities, cardDraw, myhealthChange, opponentHealthChange, 0, int(location == 1 or (abilities&2) > 0)))
+            enemy_cards.append(Card(cardNumber, cardType, instanceId, cost, attack, defense, abilities, cardDraw, myhealthChange, opponentHealthChange, 0, int(location == 1 or (abilities&2) > 0)))
         else:
-            hand.append(Card(cardType, instanceId, cost, attack, defense, abilities, cardDraw, myhealthChange, opponentHealthChange, 1, int(location == 1 or (abilities&2) > 0)))
-            nums.append(cardNumber)
+            hand.append(Card(cardNumber, cardType, instanceId, cost, attack, defense, abilities, cardDraw, myhealthChange, opponentHealthChange, 1, int(location == 1 or (abilities&2) > 0)))
     
     if turns < 30:
-        nhand = []
-        for i in range(3):
-            if (hand[i].type_ == 0 or nums[i] in exceptions) and not nums[i] in trash:
-                nhand.append(i)
-        if len(nhand) == 0:
-            nhand = list(range(3))
+        nhand = list(range(3))
 
         best_opt = nhand[int(np.random.randint(0, len(nhand)))]
         best_ad = -INF
 
         for i in nhand:
-            if nums[i] in exceptions:
-                best_opt = i
-                exceptions.discard(nums[i])
-                break
-            ad = hand[i].getValue(True) / max(1, hand[i].cost) + hand[i].cardDraw * 3.0 * 100.0
+            ad = -pos[hand[i].num]
 
             if ad > best_ad:
                 best_ad = ad
                 best_opt = i
 
         print('PICK', best_opt)
-        mc[min(hand[best_opt].cost, 8)] += 1
         turns += 1
     else:
         s = ''
